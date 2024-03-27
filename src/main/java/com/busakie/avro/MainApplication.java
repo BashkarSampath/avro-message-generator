@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 import org.apache.avro.Schema;
+import org.apache.avro.Schema.Parser;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
@@ -30,9 +31,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -41,6 +45,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -61,7 +66,8 @@ public class MainApplication {
 
 	@PostMapping("/data/encoded-json")
 	public ResponseEntity<String> getAvroEncodedJSON(@RequestBody RequestModel input) throws IOException {
-		byte[] avroJsonBytes = this.generateAvroJsonBytes(input);
+		Schema avroSchema = ReflectData.get().getSchema(RequestModel.class);
+		byte[] avroJsonBytes = generateAvroJsonBytes(avroSchema, input);
 		String avroJsonString = new String(avroJsonBytes);
 		log.info("AvroEncodedJson: {}", avroJsonString);
 		return ResponseEntity.ok(avroJsonString);
@@ -70,8 +76,8 @@ public class MainApplication {
 	@PostMapping("/data/generic-record-json")
 	public ResponseEntity<String> getAvroEncodedGenericRecord(@RequestBody RequestModel input) throws IOException {
 		Schema avroSchema = ReflectData.get().getSchema(RequestModel.class);
-		byte[] avroJsonBytes = this.generateAvroJsonBytes(input);
-		GenericRecord genericRecord = this.convertJsonToAvroObject(avroJsonBytes, avroSchema);
+		byte[] avroJsonBytes = generateAvroJsonBytes(avroSchema, input);
+		GenericRecord genericRecord = convertJsonToAvroObject(avroSchema, avroJsonBytes);
 		String genericRecordString = genericRecord.toString();
 		log.info("AvroGenericRecordToString: {}", genericRecordString);
 		return ResponseEntity.ok(genericRecordString);
@@ -101,11 +107,11 @@ public class MainApplication {
 	@PostMapping("/message/download")
 	public ResponseEntity<ByteArrayResource> downloadAvroMessages(@RequestBody RequestModel input) throws IOException {
 		Schema avroSchema = ReflectData.get().getSchema(RequestModel.class);
-		byte[] avroEncodedJsonBytes = this.generateAvroJsonBytes(input);
+		byte[] avroEncodedJsonBytes = generateAvroJsonBytes(avroSchema, input);
 
 		/* Convert Avro-encoded JSON to Generic Record for handling Union types */
-		GenericRecord genericRecord = this.convertJsonToAvroObject(avroEncodedJsonBytes, avroSchema);
-		byte[] avroBytes = this.convertToAvroMessage(genericRecord, avroSchema);
+		GenericRecord genericRecord = convertJsonToAvroObject(avroSchema, avroEncodedJsonBytes);
+		byte[] avroBytes = convertToAvroMessage(avroSchema, genericRecord);
 
 		ByteArrayResource resource = new ByteArrayResource(avroBytes);
 		HttpHeaders headers = new HttpHeaders();
@@ -115,14 +121,35 @@ public class MainApplication {
 		return ResponseEntity.status(HttpStatus.OK).headers(headers).body(resource);
 	}
 
-	private GenericRecord convertJsonToAvroObject(byte[] avroEncodedJsonBytes, Schema avroSchema) throws IOException {
+	@Operation(summary = "Avro Message File Download With Given AvroEncodedJsonSchema and AvroEncodedJsonMessage")
+	@PutMapping("/message/download")
+	public ResponseEntity<ByteArrayResource> downloadAvroMessages(
+			@NonNull @RequestBody CustomSchemaAvroMessageRequest customSchemaAvroMessageRequest) throws IOException {
+		Parser parser = new Parser();
+		Schema avroSchema = parser.parse(customSchemaAvroMessageRequest.getAvroEncodedJsonSchema().toString());
+		byte[] avroEncodedJsonBytes = customSchemaAvroMessageRequest.getAvroEncodedJsonMessage().toString().getBytes();
+
+		/* Convert Avro-encoded JSON to Generic Record for handling Union types */
+		GenericRecord genericRecord = convertJsonToAvroObject(avroSchema, avroEncodedJsonBytes);
+		byte[] avroBytes = convertToAvroMessage(avroSchema, genericRecord);
+
+		ByteArrayResource resource = new ByteArrayResource(avroBytes);
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+		headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=avro_message.avro");
+		headers.setContentLength(avroBytes.length);
+		return ResponseEntity.status(HttpStatus.OK).headers(headers).body(resource);
+	}
+
+	public static GenericRecord convertJsonToAvroObject(Schema avroSchema, byte[] avroEncodedJsonBytes)
+			throws IOException {
 		JsonDecoder decoder = DecoderFactory.get().jsonDecoder(avroSchema,
 				new ByteArrayInputStream(avroEncodedJsonBytes));
 		DatumReader<org.apache.avro.generic.GenericRecord> reader = new GenericDatumReader<>(avroSchema);
 		return reader.read(null, decoder);
 	}
 
-	private final byte[] convertToAvroMessage(GenericRecord avroRecord, Schema avroSchema) throws IOException {
+	public static final byte[] convertToAvroMessage(Schema avroSchema, GenericRecord avroRecord) throws IOException {
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(avroSchema);
 		try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter)) {
@@ -134,9 +161,8 @@ public class MainApplication {
 		}
 	}
 
-	private final byte[] generateAvroJsonBytes(@lombok.NonNull RequestModel requestModel) throws IOException {
-		Schema schema = ReflectData.get().getSchema(RequestModel.class);
-
+	public static final byte[] generateAvroJsonBytes(@NonNull Schema schema, @NonNull RequestModel requestModel)
+			throws IOException {
 		/* Serialize the object into Avro JSON format */
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		DatumWriter<RequestModel> datumWriter = new ReflectDatumWriter<>(schema);
@@ -161,4 +187,15 @@ class RequestModel {
 	@Nullable
 	@io.swagger.v3.oas.annotations.media.Schema(example = "")
 	private Long phoneNumber;
+}
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+class CustomSchemaAvroMessageRequest {
+	@NonNull
+	private JsonNode avroEncodedJsonSchema;
+	@NonNull
+	private JsonNode avroEncodedJsonMessage;
 }
