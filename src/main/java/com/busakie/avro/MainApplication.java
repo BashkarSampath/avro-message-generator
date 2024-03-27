@@ -56,7 +56,7 @@ public class MainApplication {
 	@Bean
 	@Primary
 	public OpenAPI injectOpenApi() {
-		return new OpenAPI().info(new Info().title("Dummy"));
+		return new OpenAPI().info(new Info().title("com.buskie.avro-message-generator"));
 	}
 
 	@PostMapping("/data/encoded-json")
