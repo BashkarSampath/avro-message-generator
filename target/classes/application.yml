@@ -1,0 +1,48 @@
+server: 
+  port: 8443
+  ssl.enabled: false
+  compression.enabled: true
+    
+spring:
+  servlet.multipart:
+    max-file-size: 10MB
+    max-request-size: 10MB
+  output.ansi.enabled: ALWAYS
+  web:
+    resources.add-mappings: false
+  main: 
+    allow-bean-definition-overriding: true
+    banner-mode: console
+  jackson: 
+    default-property-inclusion: non-null
+    mapper:
+      accept-case-insensitive-enums: true
+    deserialization: 
+      fail-on-unknown-properties: true
+      fail-on-unresolved-object-ids: true
+         
+springdoc:
+  api-docs.enabled: true
+  swagger-ui:
+    enabled: true
+    path: "/index.html"
+    operationsSorter: "alpha"
+  show-actuator: true
+  cache.disabled: true
+
+logging:
+   pattern:
+     file: '%d{yyyy-MM-dd HH:mm:ss.SSS z} - [%thread] - %-5level- %logger{36} [%L] - %msg%n'
+     console: '%d{yyyy-MM-dd HH:mm:ss.SSS z} - [%thread] - %-5level- %logger{36} [%L] - %msg%n'
+   level: 
+    ROOT: INFO
+    org.apache.kafka: ERROR
+    org.hibernate: ERROR
+    org.springframework: INFO
+    org.springframework.secuity: ERROR
+    org.springframework.web: ERROR
+    org.springframework.ws.client.MessageTracing.received: ERROR
+    org.springframework.ws.client.MessageTracing.sent: ERROR
+    org.springframework.ws.server.MessageTracing.received: ERROR
+    org.springframework.ws.server.MessageTracing.sent: ERROR
+    reactor.netty.http.client: OFF
